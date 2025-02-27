@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Settings</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <h1>Settings</h1>
+    <form action="/settings" method="POST">
+        <label>Theme:</label>
+        <select name="theme">
+            <option value="light" <%= settings.theme === 'light' ? 'selected' : '' %>>Light</option>
+            <option value="dark" <%= settings.theme === 'dark' ? 'selected' : '' %>>Dark</option>
+        </select>
+        <br>
+        <label>Enable Notifications:</label>
+        <input type="checkbox" name="notifications_enabled" <%= settings.notifications_enabled ? 'checked' : '' %>>
+        <br>
+        <button type="submit">Save Settings</button>
+    </form>
+    <a href="index">Back</a>
+</body>
+</html>
+<style>
+    body {
+    font-family: Arial, sans-serif;
+    background-color: #f8f9fa;
+    padding: 20px;
+}
+
+h1 {
+    color: #333;
+}
+
+form {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+    max-width: 400px;
+    margin: auto;
+}
+
+label {
+    display: block;
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+select, input[type="checkbox"] {
+    margin-top: 5px;
+}
+
+button {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    margin-top: 15px;
+    font-size: 16px;
+    background-color: #28a745; /* Green */
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #218838; /* Darker green */
+}
+
+a {
+    display: inline-block;
+    margin-top: 15px;
+    text-decoration: none;
+    color: white;
+    background: #28a745; /* Green */
+    padding: 10px 15px;
+    border-radius: 5px;
+}
+
+a:hover {
+    background: #218838; /* Darker green */
+}
+
+    
+</style>

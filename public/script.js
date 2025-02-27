@@ -1,4 +1,37 @@
 console.log("script.js is loaded!");
+// Define the loginUser function before it is called
+ // Define the loginUser function before it is called
+function loginUser(email, password) {
+  console.log("Logging in with:", email, password);
+
+  fetch("/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  })
+  .then(response => {
+    if (!response.ok) {
+      return response.json().then(err => { throw new Error(err.error); });
+    }
+    return response.json();
+  })
+  .then(data => {                  
+    console.log("Login successful:", data);
+    window.location.href = "/index";  // Redirect manually
+  })
+  .catch(error => {
+    console.error("Login error:", error.message);
+
+    // Display error message on the page
+    const errorMessage = document.getElementById("login-error");
+    if (errorMessage) {
+      errorMessage.textContent = error.message;
+      errorMessage.style.display = "block"; // Make sure it's visible
+    }
+  });
+}
+
+// Wait for the DOM to load before accessing elements
 
 document.addEventListener("DOMContentLoaded", () => {
   console.log("DOM fully loaded and parsed");
@@ -13,6 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
       loginUser(email, password);
     });
   }
+
 
   // Income Form Handling
   const incomeForm = document.getElementById("income-form");
@@ -89,21 +123,21 @@ async function loadIncome() {
   if (!user_id) return;
 
   fetch(`/income?user_id=${user_id}`)
-    .then((response) => response.json())
-    .then((data) => {
-      console.log("Income Data:", data);
-      const incomeContainer = document.getElementById("income-container");
-      if (!data || data.message) {
-        incomeContainer.innerHTML = "<p>No income records found.</p>";
-        return;
-      }
+  .then((response) => response.json())
+  .then((data) => {
+    console.log("Income Data:", data);
+
+    const incomeContainer = document.getElementById("income-container");
+    const totalIncomeDisplay = document.getElementById("total-income");
+
+    if (!data.income || data.income.length === 0) {
+      incomeContainer.innerHTML = "<p>No income records found.</p>";
+      totalIncomeDisplay.textContent = "Total Income: Ksh 0";
+      return;
+    }
 
       let html = `<h2>Income Records</h2>`;
-      if (data.length === 0) {
-        html += "<p>No income records found.</p>";
-      } else {
-        html += "<ul>";
-        data.forEach((item) => {
+      data.income.forEach((item) => {
           html += `
             <li>
               <strong>${item.category}</strong> - Ksh ${item.amount} from ${item.source} <br>
@@ -113,11 +147,12 @@ async function loadIncome() {
             </li>`;
         });
         html += "</ul>";
-      }
-      incomeContainer.innerHTML = html;
-    })
-    .catch((error) => console.error("Error loading income data:", error));
-}
+
+        incomeContainer.innerHTML = html;
+        totalIncomeDisplay.textContent = `Total Income: Ksh ${data.total_income}`;
+      })
+      .catch((error) => console.error("Error loading income data:", error));
+  }
 
 // Function to Delete Income
 function deleteIncome(income_id) {
@@ -135,24 +170,46 @@ function deleteIncome(income_id) {
 }
 
 //fetching the budget data
-async function fetchBudgets() {
+ // Fetching the budget data
+ async function fetchBudgets(category = "", timeline = "") {
   try {
-    const response = await fetch("/budgets", {
-      credentials: "include", // Include cookies for session-based authentication
-    });
+    const url = `/budgets?category=${encodeURIComponent(category)}&timeline=${encodeURIComponent(timeline)}`;
+    const response = await fetch(url, { credentials: "include" });
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.message || "Failed to fetch budgets");
     }
+
     const budgets = await response.json();
-    console.log("Budgets:", budgets);
-    // Display budgets in the UI
+    console.log("Fetched budgets:", budgets);
+
+    const budgetList = document.getElementById("budgetList");
+    budgetList.innerHTML = ""; // Clear existing list
+
+    if (budgets.length === 0) {
+      budgetList.innerHTML = "<p>No budgets found. Start by adding a new budget!</p>";
+      return; // Exit function early
+    }
+
+    budgets.forEach((budget) => {
+      const budgetItem = document.createElement("div");
+      budgetItem.innerHTML = `
+        <p>${budget.category} - ${budget.limit_amount} (${budget.timeline})</p>
+        <button onclick="deleteBudget(${budget.budget_id})">Delete</button>
+      `;
+      budgetList.appendChild(budgetItem);
+    });
+
   } catch (error) {
     console.error("Error fetching budgets:", error);
     alert(error.message);
   }
 }
+
+
 // Add Budget
+ // Add Budget
 document.getElementById("addBudgetForm").addEventListener("submit", async (e) => {
   e.preventDefault();
 
@@ -184,13 +241,15 @@ document.getElementById("addBudgetForm").addEventListener("submit", async (e) =>
     alert(error.message);
   }
 });
+
 //delete budget
+ // Delete Budget
 async function deleteBudget(budget_id) {
   if (confirm("Are you sure you want to delete this budget?")) {
     try {
       const response = await fetch(`/budgets/${budget_id}`, {
         method: "DELETE",
-        credentials: "include", // Include cookies for session-based authentication
+        credentials: "include",
       });
 
       if (!response.ok) {
@@ -209,10 +268,11 @@ async function deleteBudget(budget_id) {
 }
 
 // Fetch Budget Progress
+ // Fetch Budget Progress
 async function fetchBudgetProgress() {
   try {
     const response = await fetch("/budgets/progress", {
-      credentials: "include", // Include cookies for session-based authentication
+      credentials: "include",
     });
 
     if (!response.ok) {
@@ -228,8 +288,14 @@ async function fetchBudgetProgress() {
 
     // Populate the progress bars
     progress.forEach(p => {
-      const progressPercentage = (p.total_spent / p.limit_amount) * 100;
-      const progressColor = p.total_spent > p.limit_amount ? "red" : "green";
+      const progressPercentage = Math.min((p.total_spent / p.limit_amount) * 100, 100);
+      
+      let progressColor = "green";
+      if (p.total_spent > p.limit_amount) {
+        progressColor = "red";
+      } else if (p.total_spent >= 0.8 * p.limit_amount) {
+        progressColor = "yellow";
+      }
 
       progressBars.innerHTML += `
         <div>
@@ -237,7 +303,7 @@ async function fetchBudgetProgress() {
           <div class="progress-bar">
             <div class="progress" style="width: ${progressPercentage}%; background-color: ${progressColor};"></div>
           </div>
-          <p>Spent: $${p.total_spent} / Limit: $${p.limit_amount}</p>
+          <p>Spent: ksh${p.total_spent} / Limit: ksh${p.limit_amount}</p>
         </div>
       `;
     });
@@ -247,13 +313,20 @@ async function fetchBudgetProgress() {
   }
 }
 
+
 // Populate Category Dropdown
+ // Populate Category Dropdown
 async function populateCategoryDropdown() {
   const type = document.getElementById("transactionexpenditure").value;
 
+  if (!type) {
+    console.warn("Transaction type is empty, cannot fetch categories.");
+    return;
+  }
+
   try {
-    const response = await fetch(`/budgets/categories?type=${type}`, {
-      credentials: "include", // Include cookies for session-based authentication
+    const response = await fetch(`/budgets/categories?type=${encodeURIComponent(type)}`, {
+      credentials: "include", // Ensure cookies are sent for authentication
     });
 
     if (!response.ok) {
@@ -267,6 +340,12 @@ async function populateCategoryDropdown() {
     // Clear existing options
     categoryDropdown.innerHTML = "<option value=''>Select Category</option>";
 
+    // Ensure the response is an array
+    if (!Array.isArray(categories) || categories.length === 0) {
+      console.warn("No categories returned from the server.");
+      return;
+    }
+
     // Populate dropdown with categories
     categories.forEach(category => {
       const option = document.createElement("option");
@@ -279,6 +358,10 @@ async function populateCategoryDropdown() {
     alert(error.message);
   }
 }
+
+// Trigger category population when the expenditure type changes
+document.getElementById("transactionexpenditure").addEventListener("change", populateCategoryDropdown);
+
 
 // Add Transaction
 document.getElementById("addTransactionForm").addEventListener("submit", async (e) => {
@@ -310,6 +393,7 @@ document.getElementById("addTransactionForm").addEventListener("submit", async (
     alert(result.message);
     fetchTransactions(); // Refresh the list of transactions
     fetchBudgetProgress(); // Refresh budget progress
+    loadFinanceSummary(); // ✅ Refresh finance summary immediately
   } catch (error) {
     console.error("Error adding transaction:", error);
     alert(error.message);
@@ -317,76 +401,140 @@ document.getElementById("addTransactionForm").addEventListener("submit", async (
 });
 
 // Fetch and Display Transactions
+ // Fetch and Display Transactions
 async function fetchTransactions() {
   try {
     const response = await fetch("/transactions", {
-      credentials: "include", // Include cookies for session-based authentication
+      credentials: "include",
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to fetch transactions");
+      throw new Error("Failed to fetch transactions");
     }
 
     const transactions = await response.json();
     const transactionsTableBody = document.getElementById("transactionsTableBody");
+    transactionsTableBody.innerHTML = ""; // Clear table before populating
 
-    // Clear existing rows
-    transactionsTableBody.innerHTML = "";
+    for (let t of transactions) {
+      // Fetch budget for the same category and frequency
+      let budgetLimit = 0;
+      let totalSpent = 0;
 
-    // Populate the table with transactions
-    transactions.forEach(t => {
+      try {
+        const budgetResponse = await fetch(`/budgets?category=${t.category}&frequency=${t.frequency}`, { 
+          credentials: "include" 
+        });
+
+        if (budgetResponse.ok) {
+          const budgetData = await budgetResponse.json();
+          budgetLimit = budgetData.limit_amount;
+          totalSpent = budgetData.total_spent;
+        }
+      } catch (error) {
+        console.error("Error fetching budget data:", error);
+      }
+
+      // Check if transaction exceeds budget
+      const remainingBudget = budgetLimit - totalSpent;
+      const isOverBudget = t.amount > remainingBudget && budgetLimit > 0;
+
       const row = document.createElement("tr");
       row.innerHTML = `
         <td>${new Date(t.transaction_date).toLocaleDateString()}</td>
         <td>${t.type}</td>
         <td>${t.category}</td>
-        <td>$${t.amount}</td>
+        <td style="color: ${isOverBudget ? 'red' : 'black'};">ksh${t.amount.toFixed(2)}</td>
         <td>${t.description}</td>
         <td>${t.frequency}</td>
       `;
       transactionsTableBody.appendChild(row);
-    });
+    }
   } catch (error) {
     console.error("Error fetching transactions:", error);
     alert(error.message);
   }
 }
 
+
 // Financial Summary
-async function loadFinanceSummary() {
-  try {
-    const response = await fetch("/finance-summary", {
-      credentials: "include", // Include cookies for session-based authentication
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.message || "Failed to fetch finance summary");
-    }
-
-    const data = await response.json();
-    const totalIncome = data.total_income || 0;
-    const totalExpense = data.total_expense || 0;
-    const remaining = totalIncome - totalExpense;
-
-    // Render the finance summary (e.g., using a chart library)
-    const ctx = document.getElementById("financeChart").getContext("2d");
-    new Chart(ctx, {
-      type: "pie",
-      data: {
-        labels: ["Total Income", "Total Expense", "Remaining Balance"],
-        datasets: [{
-          data: [totalIncome, totalExpense, remaining],
-          backgroundColor: ["green", "red", "blue"]
-        }]
+  // Financial Summary
+  async function loadFinanceSummary() {
+    try {
+      const response = await fetch("/finance-summary", {
+        credentials: "include", // Include cookies for session-based authentication
+      });
+  
+      console.log("API Response Status:", response.status);
+  
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("API Error Response:", errorData);
+        throw new Error(errorData.message || "Failed to fetch finance summary");
       }
-    });
-  } catch (error) {
-    console.error("Error loading finance summary:", error);
-    alert(error.message);
+  
+      const data = await response.json();
+      console.log("Finance Summary Data:", data);
+  
+      if (!data) {
+        throw new Error("Empty response from server");
+      }
+  
+      const totalIncome = data.total_income || 0;
+      const totalExpense = data.total_expense || 0;
+      const remaining = data.remaining_balance || 0;
+  
+      const expenses = data.total_expenses || 0;
+      const bills = data.total_bills || 0;
+      const debts = data.total_debts || 0;
+      const savings = data.total_savings || 0;
+  
+      console.log("Total Income:", totalIncome);
+      console.log("Total Expense:", totalExpense);
+      console.log("Remaining Balance:", remaining);
+      console.log("Expenses Breakdown:", { expenses, bills, debts, savings });
+  
+      // Check if chart elements exist
+      const financeCanvas = document.getElementById("financeChart");
+      const expenditureCanvas = document.getElementById("expenditureChart");
+  
+      if (!financeCanvas || !expenditureCanvas) {
+        throw new Error("Chart elements are missing in HTML");
+      }
+  
+      const financeCtx = financeCanvas.getContext("2d");
+      new Chart(financeCtx, {
+        type: "pie",
+        data: {
+          labels: ["Total Income", "Total Expense", "Remaining Balance"],
+          datasets: [{
+            data: [totalIncome, totalExpense, remaining],
+            backgroundColor: ["green", "red", "blue"]
+          }]
+        }
+      });
+  
+      const expenditureCtx = expenditureCanvas.getContext("2d");
+      new Chart(expenditureCtx, {
+        type: "doughnut",
+        data: {
+          labels: ["Expenses", "Bills", "Debts", "Savings"],
+          datasets: [{
+            data: [expenses, bills, debts, savings],
+            backgroundColor: ["orange", "purple", "brown", "cyan"]
+          }]
+        }
+      });
+  
+    } catch (error) {
+      console.error("Error loading finance summary:", error);
+      alert(error.message);
+    }
   }
-}
+  
+
+
+
 // Auto-fetch data on page load
 document.addEventListener("DOMContentLoaded", async function () {
   const user_id = await getUserIdFromSession();
@@ -398,3 +546,65 @@ document.addEventListener("DOMContentLoaded", async function () {
   fetchTransactions();
   loadFinanceSummary();
 });
+
+let showAll = false;
+const defaultDisplayCount = 5;
+let transactions = []; // Empty initially, will be populated from the server
+
+async function fetchTransactions() {
+  try {
+    const response = await fetch("/transactions", { credentials: "include" });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch transactions");
+    }
+
+    transactions = await response.json(); // Store fetched transactions
+    displayTransactions(); // Update UI with real transactions
+  } catch (error) {
+    console.error("Error fetching transactions:", error);
+    alert(error.message);
+  }
+}
+
+function displayTransactions() {
+  const tbody = document.getElementById("transactionsTableBody");
+  tbody.innerHTML = ""; // Clear previous data
+
+  const displayItems = showAll ? transactions : transactions.slice(0, defaultDisplayCount);
+
+  displayItems.forEach(t => {
+    const row = `<tr>
+                  <td>${new Date(t.transaction_date).toLocaleDateString()}</td>
+                  <td>${t.type}</td>
+                  <td>${t.category}</td>
+                  <td>ksh${t.amount.toFixed(2)}</td>
+                  <td>${t.description}</td>
+                  <td>${t.frequency}</td>
+                </tr>`;
+    tbody.innerHTML += row;
+  });
+
+  // Toggle buttons based on state
+  document.getElementById("showMoreBtn").style.display = showAll ? "none" : "block";
+  document.getElementById("showLessBtn").style.display = showAll ? "block" : "none";
+}
+
+function toggleTransactions() {
+  showAll = !showAll;
+  displayTransactions();
+}
+
+// Fetch real transactions when the page loads
+fetchTransactions();
+
+
+
+// Dark Mode
+document.getElementById("toggle-theme").addEventListener("click", function() {
+  document.body.classList.toggle("dark-mode");
+});
+
+if (localStorage.getItem("theme") === "dark") {
+  document.body.classList.add("dark-mode");
+}

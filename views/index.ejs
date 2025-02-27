@@ -6,36 +6,28 @@
   <title>SpendWise</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jwt-decode/build/jwt-decode.min.js"></script>
-  <style>
-    .budget-progress {
-      margin: 20px 0;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-    }
-    .budget-progress h3 {
-      margin: 0 0 10px;
-    }
-    .progress-bar {
-      background: #f0f0f0;
-      border-radius: 5px;
-      overflow: hidden;
-      height: 20px;
-    }
-    .progress-bar .progress {
-      height: 100%;
-      transition: width 0.3s ease;
-    }
-  </style>
+  <link rel="stylesheet" href="/index.css">
+   
 </head>
 <body>
-   
-    <h1>SpendWise</h1>
-    <nav>
-      <a href="/savings">View Savings</a>
-      <a href="/debts">View Debts</a>
-    </nav>
-  
+  <div class="introduction">
+    <img src="/images/Dark_Green_Modern_Initial_Logo-removebg-preview.png" alt="">
+
+    <h2>spend smart, save more, grow strong!!!</h2>
+  </div>
+  <div class="dropdown">
+    <button class="dropbtn">☰</button>
+    <div class="dropdown-content">
+      <a href="settings">Settings</a>
+      <a href="#" id="toggle-theme">Light Mode/Dark Mode</a>
+      <a href="chat">AI Bot</a>
+      <a href="notifications">Insights/Notifications</a>
+      <a href="/logout">Logout</a>
+    </div>
+  </div>
+
+  <!-- income section -->
+  <div class="income">
     <h1>Income Management</h1>
     <!-- Income Form -->
     <form id="income-form">
@@ -66,28 +58,41 @@
     <!-- Container to Display Income Records -->
     <div id="income-container"></div>
   
-    >
+    <h2 id="total-income">Total Income: Ksh 0</h2>
+
+
+  </div>
+    
 
   <!-- Add Budget Form -->
-  <form id="addBudgetForm">
-    <h2>Set Budget</h2>
-    <select id="expenditureType" required>
-      <option value="Expense">Expense</option>
-      <option value="Bill">Bill</option>
-      <option value="Debt">Debt</option>
-      <option value="Savings">Savings</option>
-    </select>
-    <input type="text" id="budgetCategory" placeholder="Category" required>
-    <input type="number" id="limitAmount" placeholder="Limit Amount" required>
-    <select id="timeline" required>
-      <option value="one-time">One-time</option>
-      <option value="daily">Daily</option>
-      <option value="weekly">Weekly</option>
-      <option value="monthly">Monthly</option>
-      <option value="annually">Annually</option>
-    </select>
-    <button type="submit">Set Budget</button>
-  </form>
+   <div class="budgets">
+    <form id="addBudgetForm">
+      <h2>Set Budget</h2>
+      <select id="expenditureType" required>
+        <option value="Expense">Expense</option>
+        <option value="Bill">Bill</option>
+        <option value="Debt">Debt</option>
+        <option value="Savings">Savings</option>
+      </select>
+      <input type="text" id="budgetCategory" placeholder="Category" required>
+      <input type="number" id="limitAmount" placeholder="Limit Amount" required>
+      <select id="timeline" required>
+        <option value="one-time">One-time</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="annually">Annually</option>
+      </select>
+      <button type="submit">Set Budget</button>
+    </form>
+  
+    <!-- Display Budgets -->
+    <h2>Budgets</h2>
+    <div id="budgetList"></div>
+
+   </div>
+  
+
 
   <!-- Budget Progress -->
   <div id="budgetProgress" class="budget-progress">
@@ -96,48 +101,71 @@
   </div>
 
   <!-- Add Transaction Form -->
-  <form id="addTransactionForm">
-    <h2>Add Transaction</h2>
-    <select id="transactionexpenditure" required>
-      <option value="Expense">Expense</option>
-      <option value="Savings">Savings</option>
-      <option value="Debt">Debt</option>
-      <option value="Bill">Bill</option>
-    </select>
-    <select id="transactionCategory" required>
-      <option value="">Select Category</option>
-    </select>
-    <input type="number" id="amount" placeholder="Amount" required>
-    <input type="text" id="description" placeholder="Description">
-    <input type="date" id="transactionDate" required>
-    <select id="frequency">
-      <option value="one-time">One-time</option>
-      <option value="daily">Daily</option>
-      <option value="weekly">Weekly</option>
-      <option value="monthly">Monthly</option>
-      <option value="annually">Annually</option>
-    </select>
-    <button type="submit">Add Transaction</button>
-  </form>
+   <div class="transaction">
+    <form id="addTransactionForm">
+      <h2>Add Transaction</h2>
+      <select id="transactionexpenditure" required>
+        <option value="Expense">Expense</option>
+        <option value="Savings">Savings</option>
+        <option value="Debt">Debt</option>
+        <option value="Bill">Bill</option>
+      </select>
+      <select id="transactionCategory" required>
+        <option value="">Select Category</option>
+      </select>
+      <input type="number" id="amount" placeholder="Amount" required>
+      <input type="text" id="description" placeholder="Description">
+      <input type="date" id="transactionDate" required>
+      <select id="frequency">
+        <option value="one-time">One-time</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+        <option value="annually">Annually</option>
+      </select>
+      <button type="submit">Add Transaction</button>
+    </form>
+  
+    <!-- Display Transactions -->
+    <h2>Transactions</h2>
+    <table border="1">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Type</th>
+          <th>Category</th>
+          <th>Amount</th>
+          <th>Description</th>
+          <th>Frequency</th>
+        </tr>
+      </thead>
+      <tbody id="transactionsTableBody"></tbody>
+    </table>
+    <!-- Show More/Less Buttons -->
+  <button id="showMoreBtn" onclick="toggleTransactions()">Show More</button>
+  <button id="showLessBtn" onclick="toggleTransactions()" style="display: none;">Show Less</button>
+  
+  
+  
+                   
+   </div>
+  
 
-  <!-- Display Transactions -->
-  <h2>Transactions</h2>
-  <table border="1">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Type</th>
-        <th>Category</th>
-        <th>Amount</th>
-        <th>Description</th>
-        <th>Frequency</th>
-      </tr>
-    </thead>
-    <tbody id="transactionsTableBody"></tbody>
-  </table>
+<div class="Overview">
+  <div class="chart-container">
+    <h2>Expenditure Breakdown</h2>
+    <canvas id="expenditureChart"></canvas>
+  </div>
 
-  <h2>Financial Overview</h2>
-  <canvas id="financeChart" width="400" height="400"></canvas>
+  <div class="chart-container">
+    <h2>Financial Overview</h2>
+    <canvas id="financeChart"></canvas>
+  </div>
+</div>
+
+  
+
+  
 
   
   <script src="/script.js"></script>

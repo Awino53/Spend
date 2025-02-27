@@ -1,4 +1,5 @@
 const express = require("express");
+const axios = require("axios");
 const mysql = require("mysql");
 const bcrypt = require("bcryptjs");
 const bodyParser = require("body-parser");
@@ -6,6 +7,7 @@ const path = require("path");
 const cookieParser = require("cookie-parser");
 const session = require("express-session");
 
+require("dotenv").config();//load api key from .env file
 const app = express();
 const port = 3000;
 
@@ -45,6 +47,39 @@ db.connect((err) => {
   console.log("Connected to MySQL Database");
 });
 
+
+//openai api route(chatbot)
+app.post("/openai", async (req, res) => {
+  const userMessage = req.body.message;
+  if (!userMessage) {
+    return res.status(400).json({ message: "Message is required" });
+  }
+  try{
+    const response = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-3.5-turbo",
+        messages: [{ role: "user", content: userMessage }],
+        max_tokens: 100,
+      },
+      {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+      }
+    );
+
+    res.json({ reply: response.data.choices[0].message.content });
+  } catch (error) {
+    console.error("Error calling OpenAI API:", error);
+    res.status(500).json({ error: "Failed to get response from chatbot" });
+  }
+});
+
+  
+
+
 // Middleware to check authentication using session
 const authenticateSession = (req, res, next) => {
   if (!req.session.user) {
@@ -76,13 +111,24 @@ app.post("/register", async (req, res) => {
     db.query(
       "INSERT INTO users (full_name, email, password) VALUES (?, ?, ?)",
       [full_name, email, hashedPassword],
-      (err) => {
+      (err, result) => {
         if (err) return res.status(500).send("Error registering user");
-        res.redirect("/login");
+
+        // Automatically log in the user after registration
+        req.session.user = {
+          id: result.insertId,  // Get the new user's ID
+          email: email,
+          name: full_name
+        };
+
+        console.log("User registered and logged in:", req.session.user);
+
+        res.redirect("/index"); // Now the user has a session and can access /index
       }
     );
   });
 });
+
 
 // Login Routes
 app.get("/login", (req, res) => {
@@ -105,9 +151,12 @@ app.post("/login", async (req, res) => {
     req.session.user = { id: user.user_id, email: user.email, name: user.full_name };
 
     console.log("User logged in:", req.session.user);
-    res.redirect("/index"); // Redirect to the index page after successful login
+    
+    // ✅ Send JSON instead of redirecting
+    res.json({ message: "Login successful", user: req.session.user });
   });
 });
+
 
 // Endpoint to check session and return user ID
 app.get("/auth/user", (req, res) => {
@@ -118,11 +167,15 @@ app.get("/auth/user", (req, res) => {
 });
 
 // Logout Route
-app.post("/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.redirect("/login");
+app.get("/logout", (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).send("Error logging out");
+    }
+    res.redirect("/login"); // Redirect to login page after logout
   });
 });
+
 
 // Protected Index Page (Only for Authenticated Users)
 app.get("/index", authenticateSession, (req, res) => {
@@ -149,6 +202,9 @@ app.get("/session-user", (req, res) => {
 
  
 
+app.get("/chat", (req, res) => {
+  res.render("chat");
+});
 
 
  // ======== INCOME ROUTES =========
@@ -176,20 +232,31 @@ app.post("/income", authenticateSession, (req, res) => {
 });
 
 // Fetch Income Data
+ // Fetch Income Data and Total Income
 app.get("/income", authenticateSession, (req, res) => {
   const user_id = req.session.user.id;
-  db.query(
-    "SELECT income_id, category, amount, source, date_received, frequency FROM income WHERE user_id = ?",
-    [user_id],
-    (err, results) => {
+
+  const incomeQuery = "SELECT income_id, category, amount, source, date_received, frequency FROM income WHERE user_id = ?";
+  const totalIncomeQuery = "SELECT SUM(amount) AS total_income FROM income WHERE user_id = ?";
+
+  db.query(incomeQuery, [user_id], (err, results) => {
+    if (err) {
+      console.error("DB Error:", err);
+      return res.status(500).json({ message: "Error fetching income data" });
+    }
+
+    db.query(totalIncomeQuery, [user_id], (err, totalResult) => {
       if (err) {
         console.error("DB Error:", err);
-        return res.status(500).json({ message: "Error fetching income data" });
+        return res.status(500).json({ message: "Error calculating total income" });
       }
-      res.json(results);
-    }
-  );
+
+      const totalIncome = totalResult[0].total_income || 0; // If no income, default to 0
+      res.json({ income: results, total_income: totalIncome });
+    });
+  });
 });
+
 
 // Delete Income
 app.delete("/income/:id", authenticateSession, (req, res) => {
@@ -215,63 +282,107 @@ app.delete("/income/:id", authenticateSession, (req, res) => {
 
 // ======== BUDGET ROUTES =========
  // Fetch Budgets
-app.get("/budgets", authenticateSession, (req, res) => {
-  const user_id = req.session.user.id; // Get user_id from the session
-  db.query(
-    "SELECT * FROM budgets WHERE user_id = ? ORDER BY category",
-    [user_id], // Use the session user_id
-    (err, results) => {
+ // Fetch Budget by Category and Frequency
+  // Fetch Budgets
+  app.get("/budgets", authenticateSession, (req, res) => {
+    let { category, timeline } = req.query;
+    const user_id = req.session.user.id;
+  
+    // Ensure undefined values are handled
+    category = category || "";
+    timeline = timeline || "";
+  
+    console.log("Fetching budgets for user:", user_id);
+    console.log("Received query params:", { category, timeline });
+  
+    let sql = `
+      SELECT 
+        b.budget_id,
+        b.category,
+        b.expenditure_type,
+        b.timeline,
+        b.limit_amount,
+        (
+          SELECT IFNULL(SUM(t.amount), 0) 
+          FROM transactions t 
+          WHERE t.user_id = b.user_id 
+            AND t.category = b.category 
+            AND t.type = b.expenditure_type
+        ) AS total_spent
+      FROM budgets b
+      WHERE b.user_id = ?
+    `;
+  
+    let params = [user_id];
+  
+    if (category && timeline) {
+      sql += ` AND b.category = ? AND b.timeline = ?`;
+      params.push(category, timeline);
+    }
+  
+    console.log("Executing SQL:", sql, "with params:", params);
+  
+    db.query(sql, params, (err, results) => {
       if (err) {
-        console.error(err);
-        return res.status(500).json({ message: "Failed to fetch budgets" });
+        console.error("Database Error:", err);
+        return res.status(500).json({ message: "Failed to fetch budget data" });
       }
       res.json(results);
-    }
-  );
-});
+    });
+  });
+  
+
+
 
  // Add Budget
+  // Add Budget
 app.post("/budgets", authenticateSession, (req, res) => {
   const { expenditure_type, category, limit_amount, timeline } = req.body;
+  const user_id = req.session.user?.id;
 
-  // Validate required fields
-  if (!expenditure_type || !category || !limit_amount || !timeline) {
+  if (!user_id) {
+    return res.status(401).json({ message: "Unauthorized access" });
+  }
+
+  if (!category || !limit_amount || !timeline || !expenditure_type) {
     return res.status(400).json({ message: "All fields are required" });
   }
 
-  const user_id = req.session.user.id; // Get user_id from the session
+  const sql = `
+    INSERT INTO budgets (user_id, expenditure_type, category, limit_amount, timeline)
+    VALUES (?, ?, ?, ?, ?);
+  `;
 
-  const sql =
-    "INSERT INTO budgets (user_id, expenditure_type, category, limit_amount, timeline) VALUES (?, ?, ?, ?, ?)";
-  db.query(
-    sql,
-    [user_id, expenditure_type, category, limit_amount, timeline],
-    (err, result) => {
-      if (err) {
-        console.error(err);
-        return res.status(500).json({ message: "Failed to add budget" });
-      }
-      res.json({ message: "Budget added successfully", budget_id: result.insertId });
+  db.query(sql, [user_id, expenditure_type, category, limit_amount, timeline], (err, result) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Failed to add budget" });
     }
-  );
+    res.json({ message: "Budget added successfully", budget_id: result.insertId });
+  });
 });
+
  // Delete Budget
-app.delete("/budgets/:id", authenticateSession, (req, res) => {
-  const budget_id = req.params.id; // Get the budget ID from the URL
-  const user_id = req.session.user.id; // Get user_id from the session
+ // Delete Budget
+app.delete("/budgets/:budget_id", authenticateSession, (req, res) => {
+  const { budget_id } = req.params;
+  const user_id = req.session.user?.id;
+
+  if (!user_id) {
+    return res.status(401).json({ message: "Unauthorized access" });
+  }
 
   db.query(
     "DELETE FROM budgets WHERE budget_id = ? AND user_id = ?",
-    [budget_id, user_id], // Use the session user_id
+    [budget_id, user_id],
     (err, result) => {
       if (err) {
         console.error(err);
         return res.status(500).json({ message: "Failed to delete budget" });
       }
 
-      // Check if any rows were affected
       if (result.affectedRows === 0) {
-        return res.status(404).json({ message: "Budget not found or you do not have permission to delete it" });
+        return res.status(404).json({ message: "Budget not found or unauthorized" });
       }
 
       res.json({ message: "Budget deleted successfully" });
@@ -279,14 +390,48 @@ app.delete("/budgets/:id", authenticateSession, (req, res) => {
   );
 });
 
+
+//budget progress
+// Fetch Budget Progress
+ // Fetch Budget Progress
+app.get("/budgets/progress", authenticateSession, (req, res) => {
+  const user_id = req.session.user.id;
+
+  const sql = `
+    SELECT 
+      b.budget_id,
+      b.category, 
+      b.timeline, 
+      b.limit_amount, 
+      (
+        SELECT IFNULL(SUM(t.amount), 0) 
+        FROM transactions t 
+        WHERE t.user_id = b.user_id 
+          AND t.category = b.category 
+          AND t.type = b.expenditure_type
+      ) AS total_spent
+    FROM budgets b
+    WHERE b.user_id = ?;
+  `;
+
+  db.query(sql, [user_id], (err, results) => {
+    if (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Failed to fetch budget progress" });
+    }
+    res.json(results);
+  });
+});
+
+
+ // Fetch Budget Categories for a User (Filtered by Type)
  // Fetch Budget Categories for a User (Filtered by Type)
 app.get("/budgets/categories", authenticateSession, (req, res) => {
-  const user_id = req.session.user.id; // Get user_id from the session
-  const { type } = req.query; // Get the type from query parameters
+  const user_id = req.session.user.id;
+  const { type } = req.query;
 
-  // Validate type (if provided)
-  if (type && typeof type !== "string") {
-    return res.status(400).json({ message: "Invalid type parameter" });
+  if (!user_id) {
+    return res.status(401).json({ message: "Unauthorized request" });
   }
 
   let query = "SELECT DISTINCT category FROM budgets WHERE user_id = ?";
@@ -302,12 +447,19 @@ app.get("/budgets/categories", authenticateSession, (req, res) => {
       console.error("Error fetching budget categories:", err);
       return res.status(500).json({ message: "Failed to fetch budget categories" });
     }
-    res.json(results.map(r => r.category)); // Return only category names
+
+    if (!results.length) {
+      return res.status(404).json({ message: "No categories found for this type" });
+    }
+
+    // Ensure category values are returned as an array
+    const categories = results.map(row => row.category);
+    res.json(categories);
   });
 });
 
-// ======== ADD TRANSACTION WITH BUDGET CHECK =========
- // Add Transaction with Budget Check
+
+ // ======== ADD TRANSACTION WITH BUDGET CHECK =========
 app.post("/transactions", authenticateSession, (req, res) => {
   const { type, category, amount, description, transaction_date, frequency } = req.body;
   const user_id = req.session.user.id; // Get user_id from the session
@@ -336,12 +488,12 @@ app.post("/transactions", authenticateSession, (req, res) => {
       return res.status(500).json({ message: "Failed to fetch budget" });
     }
 
-    if (budgetResult.length === 0) {
-      return res.status(400).json({ message: "No budget set for this category and timeline" });
+    let budgetLimit = 0;
+    let timeline = frequency;
+    if (budgetResult.length > 0) {
+      budgetLimit = budgetResult[0].limit_amount;
+      timeline = budgetResult[0].timeline;
     }
-
-    const budgetLimit = budgetResult[0].limit_amount;
-    const timeline = budgetResult[0].timeline;
 
     // Step 2: Calculate total spending for the category within the budget timeline
     let spendingQuery = `
@@ -374,18 +526,11 @@ app.post("/transactions", authenticateSession, (req, res) => {
         return res.status(500).json({ message: "Failed to fetch spending" });
       }
 
-      const totalSpent = spendingResult[0].total_spent || 0;
+      const totalSpent = spendingResult[0]?.total_spent || 0;
       const remainingBudget = budgetLimit - totalSpent;
+      const isOverBudget = amount > remainingBudget && budgetLimit > 0; // If budget is 0, don't consider over-budget
 
-      // Step 3: Check if the transaction exceeds the budget
-      if (amount > remainingBudget) {
-        return res.status(400).json({ 
-          message: `Transaction exceeds budget for category ${category}`,
-          remainingBudget: remainingBudget
-        });
-      }
-
-      // Step 4: Save the transaction in the database
+      // Step 3: Save the transaction in the database
       const transactionQuery = `
         INSERT INTO transactions (user_id, type, category, amount, description, transaction_date, frequency)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -397,9 +542,12 @@ app.post("/transactions", authenticateSession, (req, res) => {
           console.error("Error adding transaction:", err);
           return res.status(500).json({ message: "Failed to add transaction" });
         }
+
         res.json({ 
           message: "Transaction added successfully", 
-          transaction_id: result.insertId 
+          transaction_id: result.insertId,
+          is_over_budget: isOverBudget, 
+          remainingBudget: remainingBudget
         });
       });
     });
@@ -407,7 +555,6 @@ app.post("/transactions", authenticateSession, (req, res) => {
 });
 
 // ======== FETCH TRANSACTIONS FOR A USER =========
- // Fetch Transactions for a User
 app.get("/transactions", authenticateSession, (req, res) => {
   const user_id = req.session.user.id; // Get user_id from the session
 
@@ -424,56 +571,115 @@ app.get("/transactions", authenticateSession, (req, res) => {
   );
 });
 
-// ======== FETCH BUDGET PROGRESS =========
- // Fetch Budget Progress for a User
-app.get("/budgets/progress", authenticateSession, (req, res) => {
-  const user_id = req.session.user.id; // Get user_id from the session
 
-  const query = `
-    SELECT b.category, b.limit_amount, b.timeline, COALESCE(SUM(t.amount), 0) AS total_spent
-    FROM budgets b
-    LEFT JOIN transactions t 
-      ON b.user_id = t.user_id 
-      AND b.category = t.category
-      AND (
-        (b.timeline = 'daily' AND t.transaction_date >= CURDATE()) OR
-        (b.timeline = 'weekly' AND t.transaction_date >= DATE_SUB(NOW(), INTERVAL 1 WEEK)) OR
-        (b.timeline = 'monthly' AND t.transaction_date >= DATE_SUB(NOW(), INTERVAL 1 MONTH)) OR
-        (b.timeline = 'annually' AND t.transaction_date >= DATE_SUB(NOW(), INTERVAL 1 YEAR)) OR
-        (b.timeline = 'one-time' AND t.transaction_date >= b.created_at)
-      )
-    WHERE b.user_id = ?
-    GROUP BY b.category, b.limit_amount, b.timeline
-  `;
-
-  db.query(query, [user_id], (err, results) => {
-    if (err) {
-      console.error("Error fetching budget progress:", err);
-      return res.status(500).json({ message: "Failed to fetch budget progress. Please try again later." });
-    }
-    res.json(results);
-  });
-});
+ 
 
 // ======== FINANCE SUMMARY =========
- // Fetch Finance Summary for a User
+  // Fetch Finance Summary for a User
 app.get("/finance-summary", authenticateSession, (req, res) => {
   const user_id = req.session.user.id; // Get user_id from the session
 
   const query = `
     SELECT 
-      (SELECT SUM(amount) FROM income WHERE user_id = ?) AS total_income, 
-      (SELECT SUM(amount) FROM transactions WHERE user_id = ?) AS total_expense
+      (SELECT COALESCE(SUM(amount), 0) FROM income WHERE user_id = ?) AS total_income, 
+      (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = ? 
+        AND type IN ('expense', 'bill', 'debt', 'savings')) AS total_expense, 
+      (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = ? AND type = 'expense') AS total_expenses,
+      (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = ? AND type = 'bill') AS total_bills,
+      (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = ? AND type = 'debt') AS total_debts,
+      (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE user_id = ? AND type = 'savings') AS total_savings
   `;
 
-  db.query(query, [user_id, user_id], (err, results) => {
+  db.query(query, [user_id, user_id, user_id, user_id, user_id, user_id], (err, results) => {
     if (err) {
       console.error("Error fetching finance summary:", err);
       return res.status(500).json({ message: "Failed to fetch finance summary. Please try again later." });
     }
-    res.json(results[0]);
+
+    const summary = results[0];
+    summary.remaining_balance = summary.total_income - summary.total_expense; // Calculate remaining balance
+
+    res.json(summary);
   });
 });
+
+
+// Fetch Notifications
+app.get("/notifications", authenticateSession, (req, res) => {
+  const user_id = req.session.user.id; // Fix: Ensure user_id is correctly accessed
+
+  db.query(
+    "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC",
+    [user_id], // Use the correct variable
+    (err, results) => {
+      if (err) throw err;
+      res.render("notifications", { notifications: results });
+    }
+  );
+});
+
+
+// Fetch Settings
+app.get("/settings", authenticateSession, (req, res) => {
+  const user_id = req.session.user.id; // Fix: Ensure user_id is correctly accessed
+
+  db.query(
+    "SELECT * FROM settings WHERE user_id = ?",
+    [user_id], // Fix: Ensure correct session reference
+    (err, results) => {
+      if (err) throw err;
+
+      if (results.length === 0) {
+        // Insert default settings for the user if none exist
+        db.query(
+          "INSERT INTO settings (user_id, theme, notifications_enabled) VALUES (?, 'light', TRUE)",
+          [user_id], // Fix: Ensure correct user_id is used
+          (insertErr) => {
+            if (insertErr) throw insertErr;
+
+            res.redirect("/settings"); // Reload the page after inserting defaults
+          }
+        );
+      } else {
+        res.render("settings", { settings: results[0] });
+      }
+    }
+  );
+});
+
+
+
+// Update Settings
+app.post("/settings", authenticateSession, (req, res) => {
+  const { theme, notifications_enabled } = req.body;
+  const user_id = req.session.user.id; // Fix: Ensure correct session reference
+
+  db.query(
+    "UPDATE settings SET theme = ?, notifications_enabled = ? WHERE user_id = ?",
+    [theme, notifications_enabled === "on", user_id], // Fix: Ensure correct user_id is used
+    (err) => {
+      if (err) throw err;
+      res.redirect("/settings");
+    }
+  );
+});
+
+
+
+app.get("/terms",  (req, res) => {
+  res.render("terms");
+});
+app.get("/policy",  (req, res) => {
+  res.render("policy");
+});
+app.get("/support",  (req, res) => {
+  res.render("support");
+});
+app.get("/faqs",  (req, res) => {
+  res.render("faqs");
+});
+
+
 
 // Start the server
 app.listen(port, () => {
